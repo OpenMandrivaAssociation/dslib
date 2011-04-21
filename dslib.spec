@@ -1,7 +1,7 @@
 %define name dslib
 %define version 1.4.1
 %define unmangled_version 1.4.1
-%define release 1
+%define release %mkrel 1
 
 Summary:	dslib is a free Python library for accessing Datove schranky
 Name:		%{name}
