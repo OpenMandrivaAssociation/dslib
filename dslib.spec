@@ -1,13 +1,12 @@
 %define name dslib
-%define version 1.5
-%define unmangled_version 1.5
+%define version 1.5.1
 %define release %mkrel 1
 
 Summary:	dslib is a free Python library for accessing Datove schranky
 Name:		%{name}
 Version:	%{version}
 Release:	%{release}
-Source0:	%{name}-%{unmangled_version}.tar.gz
+Source0:	%{name}-%{version}.tar.gz
 License:	LGPL
 Group:		System/Libraries
 BuildArch:	noarch
@@ -21,7 +20,7 @@ dslib is a Python library for accessing a 'Databox' - an
 electronic communication interface endorsed by the Czech government.
 
 %prep
-%setup -n %{name}-%{unmangled_version} -n %{name}-%{unmangled_version} -q
+%setup -n %{name}-%{version} -n %{name}-%{version} -q
 
 %build
 python setup.py build
