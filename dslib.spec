@@ -1,11 +1,7 @@
-%define name dslib
-%define version 1.5.1
-%define release %mkrel 1
-
 Summary:	dslib is a free Python library for accessing Datove schranky
-Name:		%{name}
-Version:	%{version}
-Release:	%{release}
+Name:		dslib
+Version:	1.6
+Release:	%mkrel 1
 Source0:	%{name}-%{version}.tar.gz
 License:	LGPL
 Group:		System/Libraries
@@ -39,4 +35,3 @@ rm -rf %{buildroot}
 %{py_puresitedir}/%{name}*/*
 %dir %{_datadir}/%{name}
 %{_datadir}/%{name}/*
-
