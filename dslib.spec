@@ -1,15 +1,14 @@
 Summary:	dslib is a free Python library for accessing Datove schranky
 Name:		dslib
-Version:	1.6
-Release:	%mkrel 1
-Source0:	%{name}-%{version}.tar.gz
+Version:	2.1.0
+Release:	1
+Source0:	http://www.nic.cz/public_media/datove_schranky/releases/datovka-2.1.1/src/%{name}-%{version}.tar.gz
 License:	LGPL
 Group:		System/Libraries
 BuildArch:	noarch
 Requires:	python-OpenSSL
 BuildRequires:	python-setuptools
 URL:		http://labs.nic.cz/datove-schranky/
-BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}
 
 %description
 dslib is a Python library for accessing a 'Databox' - an 
@@ -26,11 +25,7 @@ rm -rf %{buildroot}
 python setup.py install --single-version-externally-managed \
 	--root=%{buildroot}
 
-%clean
-rm -rf %{buildroot}
-
 %files
-%defattr(-,root,root,-)
 %dir %{py_puresitedir}/%{name}*
 %{py_puresitedir}/%{name}*/*
 %dir %{_datadir}/%{name}
