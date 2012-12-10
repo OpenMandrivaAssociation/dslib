@@ -30,3 +30,28 @@ python setup.py install --single-version-externally-managed \
 %{py_puresitedir}/%{name}*/*
 %dir %{_datadir}/%{name}
 %{_datadir}/%{name}/*
+
+
+%changelog
+* Thu Jul 19 2012 Alexander Khrukin <akhrukin@mandriva.org> 2.1.0-1
++ Revision: 810195
+- version update 2.1.0
+
+* Tue Aug 09 2011 Tomas Kindl <supp@mandriva.org> 1.6-1
++ Revision: 693765
+- update to 1.6
+
+* Sun May 29 2011 Tomas Kindl <supp@mandriva.org> 1.5.1-1
++ Revision: 681702
+-update to 1.5.1
+
+* Thu May 05 2011 Tomas Kindl <supp@mandriva.org> 1.5-1
++ Revision: 669307
+- update to 1.5
+
+* Thu Apr 21 2011 Tomas Kindl <supp@mandriva.org> 1.4.1-2
++ Revision: 656541
+-fix release!
+- fix python macros, license, group
+- import dslib
+
