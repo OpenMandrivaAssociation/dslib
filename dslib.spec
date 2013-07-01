@@ -1,4 +1,4 @@
-Summary:	dslib is a free Python library for accessing Datove schranky
+Summary:	Free Python library for accessing Datove schranky
 Name:		dslib
 Version:	2.1.0
 Release:	1
