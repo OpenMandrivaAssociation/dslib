@@ -8,7 +8,7 @@ Group:		System/Libraries
 BuildArch:	noarch
 Requires:	python-OpenSSL
 BuildRequires:	python-setuptools
-URL:		http://labs.nic.cz/datove-schranky/
+URL:		https://labs.nic.cz/datove-schranky/
 
 %description
 dslib is a Python library for accessing a 'Databox' - an 
