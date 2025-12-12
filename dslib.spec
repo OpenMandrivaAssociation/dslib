@@ -1,7 +1,7 @@
 Summary:	Free Python library for accessing Datove schranky
 Name:		dslib
 Version:	2.1.0
-Release:	3
+Release:	4
 Source0:	http://www.nic.cz/public_media/datove_schranky/releases/datovka-2.1.1/src/%{name}-%{version}.tar.gz
 License:	LGPL
 Group:		System/Libraries
