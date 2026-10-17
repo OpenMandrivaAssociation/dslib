@@ -1,0 +1,1707 @@
+diff -ruN a/certs/cert_finder.py b/certs/cert_finder.py
+--- a/certs/cert_finder.py	2012-01-13 11:31:22.000000000 +0100
++++ b/certs/cert_finder.py	2026-10-17 11:25:52.269420963 +0200
+@@ -65,7 +65,7 @@
+             sn = tbs.getComponentByName("serialNumber")                    
+             if sn == serial_number:
+                 return cert
+-        except Exception, ex:
++        except Exception as ex:
+             logging.error(ex)
+             continue
+     return None
+diff -ruN a/certs/cert_loader.py b/certs/cert_loader.py
+--- a/certs/cert_loader.py	2012-01-13 11:31:22.000000000 +0100
++++ b/certs/cert_loader.py	2026-10-17 11:35:13.117910094 +0200
+@@ -22,7 +22,6 @@
+ 
+ # standard library imports
+ import sys
+-import string
+ import base64
+ 
+ # dslib imports
+@@ -42,23 +41,24 @@
+     certCnt = 0
+     substrate = None
+     
++    chunks = []
+     for certLine in lines:
+-        certLine = string.strip(certLine)
++        certLine = certLine.strip()
+         if state == begin_cert:
+-            if state == begin_cert:
+-                if certLine == '-----BEGIN CERTIFICATE-----':
+-                    certLines = []
+-                    state = content
+-                    continue
++            if certLine == '-----BEGIN CERTIFICATE-----':
++                chunks = []
++                state = content
++                continue
+         if state == content:
+             if certLine == '-----END CERTIFICATE-----':
+                 state = end_cert
+-            else:
+-                certLines.append(certLine)
++            elif certLine:
++                chunks.append(certLine)
+         if state == end_cert:
+-            substrate = ''
+-            for certLine in certLines:
+-                substrate = substrate + base64.b64decode(certLine)
++            try:
++                substrate = b"".join(base64.b64decode(part) for part in chunks)
++            except Exception:
++                substrate = None
+     return substrate
+ 
+ 
+@@ -76,7 +76,7 @@
+     pattern = Certificate()
+     try:
+         certificate = decoder.decode(substrate, asn1Spec=pattern)[0]
+-    except Exception, e:
++    except Exception as e:
+         return None
+     
+     return certificate
+@@ -86,18 +86,18 @@
+     Parses certificate file in DER format.
+     Returns pyasn Certificate or None, if parsing failed
+     '''
+-    f = open(der_file, "r")
+-    lines = f.readlines()
+-    substrate = ''
+-    for line in lines:
+-        substrate += line    
++    try:
++        with open(der_file, "rb") as f:
++            substrate = f.read()
++    except OSError:
++        return None
+     pattern = Certificate()
+     try:
+         certificate = decoder.decode(substrate, asn1Spec=pattern)[0]
+-    except Exception, e:
+-        print e.message
++    except Exception as e:
++        print(e)
+         return None
+-    
++
+     return certificate
+ 
+ def load_certificates_from_dir(cert_folder):
+diff -ruN a/certs/cert_manager.py b/certs/cert_manager.py
+--- a/certs/cert_manager.py	2012-01-13 11:31:22.000000000 +0100
++++ b/certs/cert_manager.py	2026-10-17 11:25:52.278276739 +0200
+@@ -28,8 +28,8 @@
+ from dslib.properties.properties import Properties as props
+ 
+ # local imports
+-import cert_verifier
+-import cert_loader
++import dslib.certs.cert_verifier as cert_verifier
++import dslib.certs.cert_loader as cert_loader
+ 
+ 
+ class CertificateManager(object):
+@@ -48,7 +48,7 @@
+       return cls._cert_store[h]
+     else:
+       from pyasn1.codec.der import decoder
+-      from pkcs7.asn1_models.X509_certificate import Certificate
++      from dslib.pkcs7.asn1_models.X509_certificate import Certificate
+       data = decoder.decode(der,asn1Spec=Certificate())[0]
+       cert = cls._create_certificate(data, der)
+       cls._cert_store[h] = cert
+@@ -89,7 +89,7 @@
+   
+   @classmethod
+   def _create_certificate(cls, data, der):
+-    from pkcs7_models import X509Certificate
++    from dslib.pkcs7_models import X509Certificate
+     cert = X509Certificate(data)
+     cert.raw_der_data = der
+     if props.VERIFY_CERTIFICATE:
+diff -ruN a/certs/cert_verifier.py b/certs/cert_verifier.py
+--- a/certs/cert_verifier.py	2012-02-07 13:35:53.000000000 +0100
++++ b/certs/cert_verifier.py	2026-10-17 11:25:52.272911814 +0200
+@@ -1,4 +1,4 @@
+-from certs import cert_finder
++from dslib.certs import cert_finder
+ 
+ #*    dslib - Python library for Datove schranky
+ #*    Copyright (C) 2009-2012  CZ.NIC, z.s.p.o. (http://www.nic.cz)
+@@ -34,10 +34,10 @@
+ from dslib.pkcs7 import rsa_verifier
+ 
+ # local imports
+-import crl_store
+-from cert_finder import *
+-import timeutil
+-from constants import *
++import dslib.certs.crl_store as crl_store
++from dslib.certs.cert_finder import *
++import dslib.certs.timeutil as timeutil
++from dslib.certs.constants import *
+ 
+ logger = logging.getLogger("certs.cert_verifier")
+ 
+@@ -77,7 +77,7 @@
+     crl_cache = crl_store.CRL_cache_manager.get_cache()
+     # get the name of issuer of CRL
+     issuer_name = str(tbs.getComponentByName("issuer"))
+-    from pkcs7_models import X509Certificate
++    from dslib.pkcs7_models import X509Certificate
+     # extract CDPs from checked certificate
+     c = X509Certificate(checked_cert)
+     dist_points = crl_store.extract_crl_distpoints(c)
+diff -ruN a/certs/crl_store.py b/certs/crl_store.py
+--- a/certs/crl_store.py	2012-01-13 11:31:22.000000000 +0100
++++ b/certs/crl_store.py	2026-10-17 11:25:52.276202304 +0200
+@@ -21,7 +21,7 @@
+ '''
+ 
+ # standard library imports
+-import urllib2
++import urllib.request as urllib2
+ import logging
+ import sys
+ logger = logging.getLogger('certs.crl_store')
+@@ -34,9 +34,9 @@
+ from dslib.pkcs7.asn1_models.crl import *
+ 
+ # local imports
+-import crl_verifier
+-import timeutil
+-import fast_rev_cert_parser as fast_parser
++import dslib.certs.crl_verifier as crl_verifier
++import dslib.certs.timeutil as timeutil
++import dslib.certs.fast_rev_cert_parser as fast_parser
+ 
+ CRL_DUMP_DIR = ".crl_dumps"
+ CRL_DUMP_FILE = ".crl_dump"
+@@ -78,7 +78,7 @@
+         added_certs = 0
+         for revoked in revoked_sn_list:            
+             sn = revoked[0]
+-            if not self.revoked_certs.has_key(sn): 
++            if not (sn in self.revoked_certs): 
+                 # write the revocation time of this key (cert serial number) 
+                 self.revoked_certs[sn] = revoked[1]
+                 self.changed = True
+@@ -408,7 +408,7 @@
+         crl_fname = os.path.join(CRL_DUMP_DIR, CRL_DUMP_FILE)
+         cache = CRL_cache.unpickle(crl_fname)
+         return cache
+-    except Exception, ex:
++    except Exception as ex:
+         logger.warning(ex)
+         logger.warning("Cache restore failed")        
+         return None
+diff -ruN a/certs/crl_verifier.py b/certs/crl_verifier.py
+--- a/certs/crl_verifier.py	2012-01-13 11:31:22.000000000 +0100
++++ b/certs/crl_verifier.py	2026-10-17 11:25:52.271146293 +0200
+@@ -35,7 +35,7 @@
+ from dslib.pkcs7 import rsa_verifier
+ 
+ # local imports
+-from constants import *
++from dslib.certs.constants import *
+ 
+ 
+ def verify_crl(crl, certificate):
+diff -ruN a/client.py b/client.py
+--- a/client.py	2012-07-02 12:48:43.000000000 +0200
++++ b/client.py	2026-10-17 11:35:21.014001601 +0200
+@@ -31,28 +31,29 @@
+ import base64
+ import logging
+ import re
+-import urllib2
+-import cookielib
++import urllib.request as urllib2
++import http.cookiejar as cookielib
+ 
+ # third party imports
+ import OpenSSL
+ 
+ # local imports
+-import pkcs7.pkcs7_decoder
+-import pkcs7.verifier
+-import pkcs7.tstamp_helper
++import dslib.pkcs7.pkcs7_decoder
++import dslib.pkcs7 as pkcs7
++import dslib.pkcs7.verifier
++import dslib.pkcs7 as pkcs7
++import dslib.pkcs7.tstamp_helper
++import dslib.pkcs7 as pkcs7
+ from sudsds.client import Client as SudsClient
+ from sudsds.transport.http import HttpAuthenticated, HttpTransport
+-import exceptions
+-from ds_exceptions import \
+-  DSOTPException, DSNotAuthorizedException, DSSOAPException,\
+-  DSServerCertificateException
+-import models
+-from properties.properties import Properties as props
+-import certs.cert_loader
+-import local
+-import release
+-from network import NoPostRedirectionHTTPRedirectHandler, ProxyManager
++from dslib.ds_exceptions import    DSOTPException, DSNotAuthorizedException, DSSOAPException,   DSServerCertificateException
++import dslib.models as models
++from dslib.properties.properties import Properties as props
++import dslib.certs.cert_loader
++import dslib.certs as certs
++import dslib.local as local
++import dslib.release as release
++from dslib.network import NoPostRedirectionHTTPRedirectHandler, ProxyManager
+ 
+ 
+ class Dispatcher(object):
+@@ -74,8 +75,6 @@
+                                # username, password, etc. will be take from it
+     self.wsdl_url = wsdl_url
+     self.soap_url = soap_url # if None, default from WSDL will be used
+-    if type(server_certs) == unicode:
+-      server_certs = server_certs.encode(sys.getfilesystemencoding())
+     # test server_certs availability
+     if server_certs:
+       if not os.path.isfile(server_certs):
+@@ -317,7 +316,7 @@
+     Returns tuple xml_document, pkcs7_data, verified flag 
+     method is either a SOAP method or its name as string   
+     '''
+-    if type(method) in (str, unicode):
++    if type(method) in (str, str):
+       method = getattr(self.soap_client.service, method)
+     # decode DER encoding
+     decoded_msg = pkcs7.pkcs7_decoder.decode_msg(der_encoded)    
+@@ -343,7 +342,7 @@
+     (sets their 'is_cerified' attribute to False)
+     bad_certs_ids is array of tuples with issuer name and cert sn
+     '''
+-    import certs.cert_finder as finder
++    import dslib.certs.cert_finder as finder
+     msg_certs = message.pkcs7_data.certificates
+     for cert in bad_certs_ids:
+       found = finder.find_cert_by_iss_sn(msg_certs, cert[0], cert[1])
+@@ -369,7 +368,7 @@
+     """
+     method is either a SOAP method or its name as string
+     """
+-    if type(method) in (str, unicode):
++    if type(method) in (str, str):
+       method = getattr(self.soap_client.service, method)
+     der_encoded = base64.b64decode(signature) 
+     xml_document, pkcs_data, verified  = self._generic_get_signed(der_encoded, method)
+@@ -432,7 +431,7 @@
+     return Reply(status, message, raw_data=reply.dmSignature)
+     
+   def signature_to_delivery_info(self, signature, method):
+-    if type(method) in (str, unicode):
++    if type(method) in (str, str):
+       method = getattr(self.soap_client.service, method)
+     der_encoded = base64.b64decode(signature)  
+     xml_document, pkcs_data, verified  = self._generic_get_signed(der_encoded, method)
+@@ -514,7 +513,7 @@
+     CERT_LOGIN_AVAILABLE = True
+ 
+   wsdl_path = local.find_data_directory("wsdl")
+-  # urllib does not handle unicode strings properly 
++  # urllib does not handle str strings properly 
+   wsdl_path = os.path.abspath(wsdl_path)
+   if os.sep == "\\":
+     wsdl_path = wsdl_path.replace("\\","/")
+@@ -671,18 +670,18 @@
+         _url = url+"&sendSms=true"
+       else:
+         _url = url
+-      result = urlopener.open(_url, "")
++      result = urlopener.open(_url, b"")
+     except urllib2.HTTPError as e:
+       last_problem = ""
+       auth_meth_req = e.headers.get("WWW-Authenticate")
+       # HOTP
+       if auth_meth_req == "hotp":
+-        req = urllib2.Request(url, "")
++        req = urllib2.Request(url, b"")
+         while True:
+           hotp = self.otp_callback(last_problem=last_problem)
+           if hotp is not None:
+             basic_auth = base64.b64encode(
+-                                 "%s:%s%s" % (self.login, self.password, hotp))
++                                 ("%s:%s%s" % (self.login, self.password, hotp)).encode("utf-8")).decode("ascii")
+             req.add_header("Authorization", "Basic %s" % basic_auth)
+             try:
+               result = urlopener.open(req)
+@@ -702,10 +701,10 @@
+                                  "User did not supply an OTP")
+       # TOTP
+       if auth_meth_req == "totpsendsms":
+-        req = urllib2.Request(_url, "")
++        req = urllib2.Request(_url, b"")
+         # request an SMS to be sent using password for authentication
+         basic_auth = base64.b64encode(
+-                             "%s:%s" % (self.login, self.password))
++                             ("%s:%s" % (self.login, self.password)).encode("utf-8")).decode("ascii")
+         req.add_header("Authorization", "Basic %s" % basic_auth)
+         try:
+           result = urlopener.open(req)
+@@ -721,10 +720,10 @@
+         while True:
+           totp = self.otp_callback(last_problem=last_problem)
+           if totp is not None:
+-            req = urllib2.Request(url, "")
++            req = urllib2.Request(url, b"")
+             # make the final request obtaining the cookie
+             basic_auth = base64.b64encode(
+-                                 "%s:%s%s" % (self.login, self.password, totp))
++                                 ("%s:%s%s" % (self.login, self.password, totp)).encode("utf-8")).decode("ascii")
+             req.add_header("Authorization", "Basic %s" % basic_auth)
+             try:
+               result = urlopener.open(req)
+diff -ruN a/converters/bytes_converter.py b/converters/bytes_converter.py
+--- a/converters/bytes_converter.py	2012-01-13 11:31:22.000000000 +0100
++++ b/converters/bytes_converter.py	2026-10-17 11:26:39.994986444 +0200
+@@ -20,33 +20,24 @@
+ Routines to convert between byte strings and integers.
+ '''
+ 
+-# standard library imports
+-import types
++def _as_bytes(data):
++    if isinstance(data, str):
++        return data.encode("latin1")
++    if isinstance(data, (bytes, bytearray)):
++        return bytes(data)
++    raise TypeError("bytes expected")
+ 
+-def bytes_to_int(bytes):
+-    """
+-    Converts string of bytes to integer
+-    """    
+-    if not type(bytes) is types.StringType:
+-        raise TypeError("String expected")
+ 
+-    res = 0
+-    for byte in bytes:
+-        res *= 256        
+-        res += ord(byte)
++def bytes_to_int(data):
++    """Convert a byte string to an integer."""
++    return int.from_bytes(_as_bytes(data), "big")
+ 
+-    return res
+ 
+ def int_to_bytes(number):
+-    """
+-    Converts integer into string of bytes
+-    """
+-    if not (type(number) is types.LongType or type(number) is types.IntType):
+-        raise TypeError("Long or int expected")
+-
+-    res = ""
+-    while number > 0:
+-        res = "%s%s" % (chr(number & 0xFF), res)
+-        number /= 256
+-    
+-    return res
+\ No newline at end of file
++    """Convert an integer to a latin-1 byte string, matching the Python 2 API."""
++    if isinstance(number, bool) or not isinstance(number, int):
++        raise TypeError("int expected")
++    if number <= 0:
++        return ""
++    length = (number.bit_length() + 7) // 8
++    return number.to_bytes(length, "big").decode("latin1")
+\ No newline at end of file
+diff -ruN a/ds_exceptions.py b/ds_exceptions.py
+--- a/ds_exceptions.py	2012-01-13 11:31:22.000000000 +0100
++++ b/ds_exceptions.py	2026-10-17 11:25:52.242610332 +0200
+@@ -27,7 +27,7 @@
+     return "DSException"
+ 
+   def __str__(self):
+-    return unicode(self).encode("utf-8")
++    return str(self).encode("utf-8")
+ 
+ class DSGenericException(DSException):
+ 
+@@ -40,7 +40,7 @@
+     return "%s (code: %s)" % (self.message, self.code)
+   
+   def __str__(self):
+-    return unicode(self).encode("utf-8")
++    return str(self).encode("utf-8")
+   
+ 
+ class DSSOAPException(DSException):
+@@ -70,7 +70,7 @@
+     return "%s (code: %s)" % (self.message, self.code)
+   
+   def __str__(self):
+-    return unicode(self).encode("utf-8")
++    return str(self).encode("utf-8")
+ 
+ 
+ class DSOTPException(DSException):
+diff -ruN a/dsdb/alchemy.py b/dsdb/alchemy.py
+--- a/dsdb/alchemy.py	2012-07-03 16:00:18.000000000 +0200
++++ b/dsdb/alchemy.py	2026-10-17 11:25:52.268485932 +0200
+@@ -19,7 +19,7 @@
+ # standard library imports
+ import json
+ import base64
+-import thread
++import _thread as thread
+ 
+ # third party imports
+ import sqlalchemy as sal
+@@ -33,7 +33,7 @@
+ from dslib.certs.cert_manager import CertificateManager
+ 
+ # local imports
+-from abstract import AbstractDSDatabase
++from dslib.dsdb.abstract import AbstractDSDatabase
+ 
+ MESSAGE_TYPE_RECEIVED = 1
+ MESSAGE_TYPE_SENT = 2 
+diff -ruN a/dslib.egg-info/PKG-INFO b/dslib.egg-info/PKG-INFO
+--- a/dslib.egg-info/PKG-INFO	2012-07-11 15:26:17.000000000 +0200
++++ b/dslib.egg-info/PKG-INFO	1970-01-01 01:00:00.000000000 +0100
+@@ -1,16 +0,0 @@
+-Metadata-Version: 1.1
+-Name: dslib
+-Version: 2.1.0
+-Summary: dslib is a free Python library for accessing Datove schranky
+-Home-page: http://labs.nic.cz/datove-schranky/
+-Author: CZ.NIC Labs
+-Author-email: datove-schranky@labs.nic.cz
+-License: GNU LGPL
+-Description: dslib is a Python library for accessing a 'Databox' - an electronic communication interface endorsed by the Czech government.
+-Platform: Unix
+-Platform: Windows
+-Platform: MacOS X
+-Requires: pyOpenSSL (>=0.9)
+-Requires: sudsds (>=1.0)
+-Requires: pyasn1 (>=0.0.13)
+-Provides: dslib
+diff -ruN a/dslib.egg-info/SOURCES.txt b/dslib.egg-info/SOURCES.txt
+--- a/dslib.egg-info/SOURCES.txt	2012-07-11 15:26:17.000000000 +0200
++++ b/dslib.egg-info/SOURCES.txt	1970-01-01 01:00:00.000000000 +0100
+@@ -1,95 +0,0 @@
+-LICENSE.txt
+-MANIFEST.in
+-README.txt
+-setup.py
+-stdeb.cfg
+-./__init__.py
+-./client.py
+-./constants.py
+-./ds_exceptions.py
+-./local.py
+-./models.py
+-./network.py
+-./pkcs7_models.py
+-./pkcs_test.py
+-./release.py
+-./tests.py
+-./certs/__init__.py
+-./certs/cert_finder.py
+-./certs/cert_loader.py
+-./certs/cert_manager.py
+-./certs/cert_verifier.py
+-./certs/constants.py
+-./certs/crl_store.py
+-./certs/crl_verifier.py
+-./certs/fast_rev_cert_parser.py
+-./certs/timeutil.py
+-./converters/__init__.py
+-./converters/bytes_converter.py
+-./dsdb/__init__.py
+-./dsdb/abstract.py
+-./dsdb/alchemy.py
+-./pkcs7/__init__.py
+-./pkcs7/debug.py
+-./pkcs7/digest.py
+-./pkcs7/pkcs7_decoder.py
+-./pkcs7/rsa_verifier.py
+-./pkcs7/tstamp_helper.py
+-./pkcs7/verifier.py
+-./pkcs7/asn1_models/RSA.py
+-./pkcs7/asn1_models/TST_info.py
+-./pkcs7/asn1_models/X509_certificate.py
+-./pkcs7/asn1_models/__init__.py
+-./pkcs7/asn1_models/att_certificate_v2.py
+-./pkcs7/asn1_models/certificate_extensions.py
+-./pkcs7/asn1_models/crl.py
+-./pkcs7/asn1_models/digest_info.py
+-./pkcs7/asn1_models/general_types.py
+-./pkcs7/asn1_models/oid.py
+-./pkcs7/asn1_models/pkcs_signed_data.py
+-./pkcs7/asn1_models/tools.py
+-./properties/__init__.py
+-./properties/properties.py
+-converters/__init__.py
+-converters/bytes_converter.py
+-dsdb/__init__.py
+-dsdb/abstract.py
+-dsdb/alchemy.py
+-dslib.egg-info/PKG-INFO
+-dslib.egg-info/SOURCES.txt
+-dslib.egg-info/dependency_links.txt
+-dslib.egg-info/requires.txt
+-dslib.egg-info/top_level.txt
+-pkcs7/__init__.py
+-pkcs7/debug.py
+-pkcs7/digest.py
+-pkcs7/pkcs7_decoder.py
+-pkcs7/rsa_verifier.py
+-pkcs7/tstamp_helper.py
+-pkcs7/verifier.py
+-pkcs7/asn1_models/RSA.py
+-pkcs7/asn1_models/TST_info.py
+-pkcs7/asn1_models/X509_certificate.py
+-pkcs7/asn1_models/__init__.py
+-pkcs7/asn1_models/att_certificate_v2.py
+-pkcs7/asn1_models/certificate_extensions.py
+-pkcs7/asn1_models/crl.py
+-pkcs7/asn1_models/digest_info.py
+-pkcs7/asn1_models/general_types.py
+-pkcs7/asn1_models/oid.py
+-pkcs7/asn1_models/pkcs_signed_data.py
+-pkcs7/asn1_models/tools.py
+-properties/__init__.py
+-properties/properties.py
+-trusted_certificates/all_trusted.pem
+-trusted_certificates/postsignum_qca2_root.pem
+-trusted_certificates/postsignum_qca2_sub.pem
+-trusted_certificates/postsignum_qca_root.pem
+-trusted_certificates/postsignum_qca_sub.pem
+-wsdl/dbTypes.xsd
+-wsdl/db_access.wsdl
+-wsdl/db_manipulations.wsdl
+-wsdl/db_search.wsdl
+-wsdl/dmBaseTypes.xsd
+-wsdl/dm_info.wsdl
+-wsdl/dm_operations.wsdl
+\ No newline at end of file
+diff -ruN a/dslib.egg-info/dependency_links.txt b/dslib.egg-info/dependency_links.txt
+--- a/dslib.egg-info/dependency_links.txt	2012-07-11 15:26:17.000000000 +0200
++++ b/dslib.egg-info/dependency_links.txt	1970-01-01 01:00:00.000000000 +0100
+@@ -1 +0,0 @@
+-
+diff -ruN a/dslib.egg-info/requires.txt b/dslib.egg-info/requires.txt
+--- a/dslib.egg-info/requires.txt	2012-07-11 15:26:17.000000000 +0200
++++ b/dslib.egg-info/requires.txt	1970-01-01 01:00:00.000000000 +0100
+@@ -1,3 +0,0 @@
+-pyOpenSSL>=0.9
+-sudsds>=1.0
+-pyasn1>=0.0.13
+\ No newline at end of file
+diff -ruN a/dslib.egg-info/top_level.txt b/dslib.egg-info/top_level.txt
+--- a/dslib.egg-info/top_level.txt	2012-07-11 15:26:17.000000000 +0200
++++ b/dslib.egg-info/top_level.txt	1970-01-01 01:00:00.000000000 +0100
+@@ -1 +0,0 @@
+-dslib
+diff -ruN a/local.py b/local.py
+--- a/local.py	2012-01-13 11:31:22.000000000 +0100
++++ b/local.py	2026-10-17 11:26:39.991968318 +0200
+@@ -7,10 +7,9 @@
+ import os
+ 
+ try:
+-  local_dir = os.path.dirname(__file__)
++  local_dir = os.path.dirname(os.path.abspath(__file__))
+ except NameError:
+   local_dir = os.path.dirname(sys.executable)
+-local_dir = local_dir.decode(sys.getfilesystemencoding())
+   
+ def find_data_directory(name):
+   # at first try path set in environment variable
+diff -ruN a/models.py b/models.py
+--- a/models.py	2012-01-13 11:31:22.000000000 +0100
++++ b/models.py	2026-10-17 11:34:00.261731804 +0200
+@@ -27,13 +27,13 @@
+ 
+ import logging
+ import os
+-import constants
+-import pkcs7
++import dslib.constants as constants
++import dslib.pkcs7 as pkcs7
+ import base64
+ import datetime
+-from properties.properties import Properties as props
++from dslib.properties.properties import Properties as props
+ 
+-from pkcs7_models import *
++from dslib.pkcs7_models import *
+ 
+ class Model(object):
+ 
+@@ -51,11 +51,11 @@
+   def __unicode__(self):
+     ret = u"%s:" % self.__class__.__name__
+     for a in self.__class__.KNOWN_ATTRS:
+-      ret += u"\n  %s: %s" % (a, unicode(getattr(self, a)))
++      ret += u"\n  %s: %s" % (a, str(getattr(self, a)))
+     return ret
+ 
+   def __str__(self):
+-    return unicode(self).encode('utf-8')
++    return self.__unicode__()
+ 
+   # ---------- private methods ----------
+ 
+@@ -102,9 +102,9 @@
+   def _decode_soap_value(self, soap):
+     """take a value as returned by SOAP and return a more suitable one;
+     for example suds uses a class for text, so we translate to normal
+-    unicode string here"""
++    str string here"""
+     if soap.__class__.__name__ == "Text":
+-      return unicode(soap)
++      return str(soap)
+     return soap
+ 
+ 
+@@ -389,7 +389,7 @@
+     if not fname:
+       fname = self._dmFileDescr
+     fullname = os.path.join(dir, fname)
+-    outf = file(fullname, "wb")
++    outf = open(fullname, "wb")
+     outf.write(self.get_decoded_content())
+     outf.close()
+     return fullname
+diff -ruN a/network.py b/network.py
+--- a/network.py	2012-01-13 11:31:22.000000000 +0100
++++ b/network.py	2026-10-17 11:25:52.261518659 +0200
+@@ -17,7 +17,7 @@
+ #*    02110-1301  USA
+ #*
+ 
+-import urllib2
++import urllib.request as urllib2
+ import re
+ 
+ class Proxy(object):
+diff -ruN a/pkcs7/asn1_models/TST_info.py b/pkcs7/asn1_models/TST_info.py
+--- a/pkcs7/asn1_models/TST_info.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/TST_info.py	2026-10-17 11:25:52.284786587 +0200
+@@ -50,10 +50,10 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from X509_certificate import *
+-from general_types import *
+-from oid import oid_map as oid_map
+-from certificate_extensions import *
++from dslib.pkcs7.asn1_models.X509_certificate import *
++from dslib.pkcs7.asn1_models.general_types import *
++from dslib.pkcs7.asn1_models.oid import oid_map as oid_map
++from dslib.pkcs7.asn1_models.certificate_extensions import *
+ 
+ 
+ class MessageImprint(univ.Sequence):
+diff -ruN a/pkcs7/asn1_models/X509_certificate.py b/pkcs7/asn1_models/X509_certificate.py
+--- a/pkcs7/asn1_models/X509_certificate.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/X509_certificate.py	2026-10-17 11:25:52.290236442 +0200
+@@ -29,9 +29,9 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from tools import *
+-from oid import oid_map as oid_map
+-from general_types import  *
++from dslib.pkcs7.asn1_models.tools import *
++from dslib.pkcs7.asn1_models.oid import oid_map as oid_map
++from dslib.pkcs7.asn1_models.general_types import  *
+ 
+ 
+ class Extension(univ.Sequence):
+diff -ruN a/pkcs7/asn1_models/att_certificate_v2.py b/pkcs7/asn1_models/att_certificate_v2.py
+--- a/pkcs7/asn1_models/att_certificate_v2.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/att_certificate_v2.py	2026-10-17 11:25:52.286628639 +0200
+@@ -25,9 +25,9 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from X509_certificate import *
+-from general_types import *
+-from oid import oid_map as oid_map
++from dslib.pkcs7.asn1_models.X509_certificate import *
++from dslib.pkcs7.asn1_models.general_types import *
++from dslib.pkcs7.asn1_models.oid import oid_map as oid_map
+ '''
+ ASN.1 modules from http://www.ietf.org/rfc/rfc3281.txt
+ '''
+diff -ruN a/pkcs7/asn1_models/certificate_extensions.py b/pkcs7/asn1_models/certificate_extensions.py
+--- a/pkcs7/asn1_models/certificate_extensions.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/certificate_extensions.py	2026-10-17 11:25:52.289286101 +0200
+@@ -28,8 +28,8 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from tools import *
+-from oid import oid_map as oid_map
++from dslib.pkcs7.asn1_models.tools import *
++from dslib.pkcs7.asn1_models.oid import oid_map as oid_map
+ from dslib.pkcs7.asn1_models.general_types import  *
+          
+ 
+diff -ruN a/pkcs7/asn1_models/crl.py b/pkcs7/asn1_models/crl.py
+--- a/pkcs7/asn1_models/crl.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/crl.py	2026-10-17 11:25:52.293254838 +0200
+@@ -53,8 +53,8 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from general_types import *
+-from X509_certificate import *
++from dslib.pkcs7.asn1_models.general_types import *
++from dslib.pkcs7.asn1_models.X509_certificate import *
+ 
+ class RevokedCertInfo(univ.Sequence):
+     '''
+diff -ruN a/pkcs7/asn1_models/digest_info.py b/pkcs7/asn1_models/digest_info.py
+--- a/pkcs7/asn1_models/digest_info.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/digest_info.py	2026-10-17 11:25:52.292410558 +0200
+@@ -26,7 +26,7 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from general_types import AlgorithmIdentifier
++from dslib.pkcs7.asn1_models.general_types import AlgorithmIdentifier
+ 
+ class DigestInfo(univ.Sequence):
+     componentType = namedtype.NamedTypes(
+diff -ruN a/pkcs7/asn1_models/general_types.py b/pkcs7/asn1_models/general_types.py
+--- a/pkcs7/asn1_models/general_types.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/general_types.py	2026-10-17 11:35:56.665107312 +0200
+@@ -26,8 +26,8 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from tools import *
+-from oid import *
++from dslib.pkcs7.asn1_models.tools import *
++from dslib.pkcs7.asn1_models.oid import *
+ 
+ 
+ class ConvertibleBitString(univ.BitString):
+@@ -38,19 +38,10 @@
+     
+     def toOctets(self):
+         '''
+-        Converts bit string into octets string
++        Converts a bit string into raw octets.
++        pyasn1 0.6 stores the value as a sized integer, not a tuple of bits.
+         '''
+-        def _tuple_to_byte(tuple):          
+-          return chr(int(''.join(map(str, tuple)),2))
+-      
+-        res = ''        
+-        byte_len = len(self._value) / 8
+-        for byte_idx in xrange(byte_len):
+-            bit_idx = byte_idx * 8
+-            byte_tuple = self._value[bit_idx:bit_idx + 8]
+-            byte = _tuple_to_byte(byte_tuple)            
+-            res += byte
+-        return res
++        return self.asOctets()
+ 
+ class DirectoryString(univ.Choice):    
+     componentType = namedtype.NamedTypes(
+@@ -76,7 +67,9 @@
+ 
+ class AttributeType(univ.ObjectIdentifier): 
+     def __str__(self):
+-        return tuple_to_OID(self._value)
++        if not self.isValue:
++            return self.__class__.__name__
++        return tuple_to_OID(self)
+ 
+ class AttributeTypeAndValue(univ.Sequence):
+     componentType = namedtype.NamedTypes(
+@@ -84,7 +77,9 @@
+         namedtype.NamedType('value', AttributeValue())
+         )
+     def __repr__(self):
+-       # s = "%s => %s" % [ self.getComponentByName('type'), self.getComponentByName('value')]
++       # Schema objects are repr()'d while pyasn1 builds NamedTypes.
++       if not self.isValue:
++           return self.__class__.__name__
+        type = self.getComponentByName('type')
+        value = self.getComponentByName('value')
+        s = "%s => %s" % (type,value)
+@@ -133,9 +128,10 @@
+ #        namedtype.OptionalNamedType('parameters', univ.ObjectIdentifier())
+         )
+     def __repr__(self):
+-        tuple = self.getComponentByName('algorithm')
+-        str_oid = tuple_to_OID(tuple)
+-        return str_oid
++        if not self.isValue:
++            return self.__class__.__name__
++        algorithm = self.getComponentByName('algorithm')
++        return tuple_to_OID(algorithm)
+     
+     def __str__(self):
+         return repr(self)
+diff -ruN a/pkcs7/asn1_models/pkcs_signed_data.py b/pkcs7/asn1_models/pkcs_signed_data.py
+--- a/pkcs7/asn1_models/pkcs_signed_data.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/pkcs_signed_data.py	2026-10-17 11:32:49.588404645 +0200
+@@ -28,10 +28,10 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from X509_certificate import Certificates
+-from att_certificate_v2 import CertificateSet
+-from general_types import *
+-from oid import oid_map as oid_map
++from dslib.pkcs7.asn1_models.X509_certificate import Certificates
++from dslib.pkcs7.asn1_models.att_certificate_v2 import CertificateSet
++from dslib.pkcs7.asn1_models.general_types import *
++from dslib.pkcs7.asn1_models.oid import oid_map as oid_map
+ 
+ 
+ class SignedContent(univ.SequenceOf):
+@@ -44,7 +44,7 @@
+                     )
+     def getContentValue(self):
+         values = []
+-        for idx in xrange(len(self)):
++        for idx in range(len(self)):
+             comp = self.getComponentByPosition(idx)
+             values.append(comp._value)
+         return "".join(values)
+@@ -119,7 +119,9 @@
+ class Crl(univ.Sequence):
+     pass
+ 
+-class Crls(univ.Set):
++class Crls(univ.SetOf):
++    # PKCS#7 crls is SET OF CertificateRevocationList. pyasn1 0.6 Set
++    # expects NamedTypes; a single component type belongs on SetOf.
+     componentType = Crl()
+ 
+ class V1Content(univ.Sequence):   
+diff -ruN a/pkcs7/asn1_models/tools.py b/pkcs7/asn1_models/tools.py
+--- a/pkcs7/asn1_models/tools.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/asn1_models/tools.py	2026-10-17 11:32:11.222217628 +0200
+@@ -25,21 +25,22 @@
+ from pyasn1 import error
+ 
+ # local imports
+-from RSA import *
++from dslib.pkcs7.asn1_models.RSA import *
+ 
+ 
+-def tuple_to_OID(tuple):
++def tuple_to_OID(oid):
+     """
+-    Converts OID tuple to OID string
++    Converts an OID tuple, or an ObjectIdentifier value, to a dotted string.
++    Schema objects have no arcs yet; return their type name instead of
++    calling len() on them (pyasn1 0.6 rejects that).
+     """
+-    l = len(tuple)
+-    buf = ''
+-    for idx in xrange(l):
+-        if (idx < l-1):
+-            buf += str(tuple[idx]) + '.'
+-        else:
+-            buf += str(tuple[idx])
+-    return buf
++    if hasattr(oid, "isValue") and not oid.isValue:
++        return oid.__class__.__name__
++    if hasattr(oid, "asTuple"):
++        oid = oid.asTuple()
++    elif not isinstance(oid, (tuple, list)):
++        return str(oid)
++    return ".".join(str(arc) for arc in oid)
+ 
+ def get_RSA_pub_key_material(subjectPublicKeyAsn1):
+     '''
+diff -ruN a/pkcs7/debug.py b/pkcs7/debug.py
+--- a/pkcs7/debug.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/debug.py	2026-10-17 11:25:52.279039168 +0200
+@@ -21,10 +21,10 @@
+ 
+ '''
+ def show_bytes(string):
+-    print '--------------'       
++    print('--------------')
+     for byte in string:        
+-        print hex(ord(byte)),
+-    print '\n--------------'
++        print(hex(ord(byte)),)
++    print('\n--------------')
+ 
+ def write_to_file(what, where):
+     ff = open(where,"w")
+diff -ruN a/pkcs7/pkcs7_decoder.py b/pkcs7/pkcs7_decoder.py
+--- a/pkcs7/pkcs7_decoder.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/pkcs7_decoder.py	2026-10-17 11:27:06.843601910 +0200
+@@ -20,16 +20,16 @@
+ Decoding of PKCS7 messages
+ '''
+ 
+-from cStringIO import StringIO
++from io import BytesIO as StringIO
+ 
+ # dslib imports
+ from pyasn1.codec.der import decoder
+ from pyasn1 import error
+ 
+ # local imports
+-from asn1_models.pkcs_signed_data import *
+-from asn1_models.digest_info import *
+-from asn1_models.TST_info import *
++from dslib.pkcs7.asn1_models.pkcs_signed_data import *
++from dslib.pkcs7.asn1_models.digest_info import *
++from dslib.pkcs7.asn1_models.TST_info import *
+ 
+ 
+ class StringView(object):
+@@ -71,8 +71,10 @@
+     self._string.seek(self._start)
+     return self._string.read(self._end-self._start)
+ 
+-  def __nonzero__(self):
+-    return len(self)
++  def __bool__(self):
++    return len(self) != 0
++
++  __nonzero__ = __bool__
+ 
+ 
+ def decode_msg(message):    
+diff -ruN a/pkcs7/rsa_verifier.py b/pkcs7/rsa_verifier.py
+--- a/pkcs7/rsa_verifier.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/rsa_verifier.py	2026-10-17 11:35:56.677778873 +0200
+@@ -35,7 +35,7 @@
+ from dslib.converters.bytes_converter import *
+ 
+ # local imports
+-from asn1_models.digest_info import *
++from dslib.pkcs7.asn1_models.digest_info import *
+ 
+ 
+ def _fast_exponentiation(a, p, n):
+@@ -59,9 +59,13 @@
+     (the hash of the original document)
+     '''
+     di = DigestInfo()
++    if isinstance(pkcs1_5_DER_bytes, str):
++        pkcs1_5_DER_bytes = pkcs1_5_DER_bytes.encode("latin1")
+     digestInfo = decoder.decode(pkcs1_5_DER_bytes, asn1Spec = di)[0]
+     hash = digestInfo.getComponentByName("digest")._value
+-    return hash
++    if isinstance(hash, str):
++        hash = hash.encode("latin1")
++    return bytes(hash)
+     
+ 
+ def _extract_hash_from_decoded_sig(pkcs1_5_encoded_bytes):
+@@ -72,13 +76,15 @@
+     msg is DER encoded DigestInfo, which contains hash alg specification
+     and the hash itself
+     '''
+-    logger.debug("Decoding RSA EMSA-PKCS-v1.5 encoding scheme")  
++    logger.debug("Decoding RSA EMSA-PKCS-v1.5 encoding scheme")
++    if isinstance(pkcs1_5_encoded_bytes, str):
++        pkcs1_5_encoded_bytes = pkcs1_5_encoded_bytes.encode("latin1")
+     idx = 0
+     for byte in pkcs1_5_encoded_bytes:
+-        if ord(byte) == 0x01 or ord(byte) == 0xff:
++        if byte == 0x01 or byte == 0xff:
+             idx += 1
+             continue
+-        if ord(byte) == 0x00:
++        if byte == 0x00:
+             idx += 1
+             break
+     decoded_bytes = pkcs1_5_encoded_bytes[idx:]
+diff -ruN a/pkcs7/tstamp_helper.py b/pkcs7/tstamp_helper.py
+--- a/pkcs7/tstamp_helper.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/tstamp_helper.py	2026-10-17 11:25:52.283191808 +0200
+@@ -34,8 +34,8 @@
+ from dslib import models
+ 
+ # local imports
+-import pkcs7_decoder
+-import verifier
++import dslib.pkcs7.pkcs7_decoder as pkcs7_decoder
++import dslib.pkcs7.verifier as verifier
+ 
+ 
+ def parse_qts(dmQTimestamp, verify=False):
+diff -ruN a/pkcs7/verifier.py b/pkcs7/verifier.py
+--- a/pkcs7/verifier.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7/verifier.py	2026-10-17 11:25:52.280658958 +0200
+@@ -1,4 +1,4 @@
+-from certs import cert_finder
++from dslib.certs import cert_finder
+ 
+ #*    dslib - Python library for Datove schranky
+ #*    Copyright (C) 2009-2012  CZ.NIC, z.s.p.o. (http://www.nic.cz)
+@@ -32,15 +32,15 @@
+ from dslib.certs.cert_finder import *
+ 
+ # local imports
+-from asn1_models.tools import *
+-from asn1_models.oid import *
+-from asn1_models.X509_certificate import *
+-from asn1_models.pkcs_signed_data import *
+-from asn1_models.RSA import *
+-from asn1_models.digest_info import *
+-from rsa_verifier import *
+-from debug import *
+-from digest import *
++from dslib.pkcs7.asn1_models.tools import *
++from dslib.pkcs7.asn1_models.oid import *
++from dslib.pkcs7.asn1_models.X509_certificate import *
++from dslib.pkcs7.asn1_models.pkcs_signed_data import *
++from dslib.pkcs7.asn1_models.RSA import *
++from dslib.pkcs7.asn1_models.digest_info import *
++from dslib.pkcs7.rsa_verifier import *
++from dslib.pkcs7.debug import *
++from dslib.pkcs7.digest import *
+ 
+ 
+ MESSAGE_DIGEST_KEY = "1.2.840.113549.1.9.4"
+@@ -77,7 +77,7 @@
+                 getComponentByName("algorithm"))
+     
+     algorithm = None
+-    if oid_map.has_key(signing_alg):
++    if (signing_alg in oid_map):
+         algorithm = oid_map[signing_alg]
+     
+     logger.debug("Extracting key material form public key:")
+@@ -101,7 +101,7 @@
+     '''
+     digest_alg = str(signer_info.getComponentByName("digestAlg"))
+     result = None
+-    if oid_map.has_key(digest_alg):
++    if (digest_alg in oid_map):
+         result = oid_map[digest_alg]
+     if result is None:
+         logger.error("Unknown digest algorithm: %s" % digest_alg)
+diff -ruN a/pkcs7_models.py b/pkcs7_models.py
+--- a/pkcs7_models.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs7_models.py	2026-10-17 11:34:27.511715244 +0200
+@@ -22,18 +22,18 @@
+ 
+ '''
+ 
+-from pkcs7.asn1_models.tools import *
+-from pkcs7.asn1_models.oid import *
+-from pkcs7.asn1_models.tools import *
+-from pkcs7.asn1_models.X509_certificate import *
+-from pkcs7.asn1_models.certificate_extensions import *
+-from pkcs7.debug import *
+-from certs.cert_manager import CertificateManager
++from dslib.pkcs7.asn1_models.tools import *
++from dslib.pkcs7.asn1_models.oid import *
++from dslib.pkcs7.asn1_models.tools import *
++from dslib.pkcs7.asn1_models.X509_certificate import *
++from dslib.pkcs7.asn1_models.certificate_extensions import *
++from dslib.pkcs7.debug import *
++from dslib.certs.cert_manager import CertificateManager
+ import datetime, time
+ try:
+   from dslib.properties.properties import Properties
+ except ImportError:
+-  from properties.properties import Properties
++  from dslib.properties.properties import Properties
+ 
+ 
+ #class SignedData():    
+@@ -72,13 +72,12 @@
+             for attr in name_part:
+                 type = str(attr.getComponentByPosition(0).getComponentByName('type'))                
+                 value = str(attr.getComponentByPosition(0).getComponentByName('value'))
+-                self.__attributes[type] = value 
+-        self.__attributes.keys().sort()       
+-    
+-    def __str__(self):        
++                self.__attributes[type] = value
++        self.__attributes = dict(sorted(self.__attributes.items()))
++
++    def __str__(self):
+         result = ''
+-        self.__attributes.keys().sort()
+-        for key in self.__attributes.keys():
++        for key in self.__attributes:
+             result += key
+             result += ' => '
+             result += self.__attributes[key]
+@@ -86,7 +85,6 @@
+         return result[:len(result)-1]
+         
+     def get_attributes(self):
+-        self.__attributes.keys().sort()
+         return self.__attributes.copy()
+ 
+ class ValidityInterval():
+@@ -442,7 +440,7 @@
+                                        ignore_missing_crl_check=False):
+       if verification_results is None:
+         return False
+-      for key, value in verification_results.iteritems():
++      for key, value in verification_results.items():
+         if value:
+           pass
+         elif ignore_missing_crl_check and key=="CERT_NOT_REVOKED" and \
+@@ -483,7 +481,7 @@
+         return True
+       
+     def get_revocation_date(self):
+-      from certs.crl_store import CRL_cache_manager
++      from dslib.certs.crl_store import CRL_cache_manager
+       cache = CRL_cache_manager.get_cache()
+       issuer = str(self.tbsCertificate.issuer)
+       rev_date = cache.certificate_rev_date(issuer, self.tbsCertificate.serial_number)
+diff -ruN a/pkcs_test.py b/pkcs_test.py
+--- a/pkcs_test.py	2012-01-13 11:31:22.000000000 +0100
++++ b/pkcs_test.py	2026-10-17 11:25:52.249240661 +0200
+@@ -29,23 +29,26 @@
+ 
+ #logger.setLevel(logging.DEBUG)
+ 
+-import pkcs7
+-import pkcs7.pkcs7_decoder
+-import pkcs7.verifier
+-import pkcs7.asn1_models.oid
++import dslib.pkcs7 as pkcs7
++import dslib.pkcs7.pkcs7_decoder
++import dslib.pkcs7 as pkcs7
++import dslib.pkcs7.verifier
++import dslib.pkcs7 as pkcs7
++import dslib.pkcs7.asn1_models.oid
++import dslib.pkcs7 as pkcs7
+ 
+ import os
+ 
+-from pkcs7.asn1_models.TST_info import *
+-from pkcs7.asn1_models.pkcs_signed_data import *
++from dslib.pkcs7.asn1_models.TST_info import *
++from dslib.pkcs7.asn1_models.pkcs_signed_data import *
+ 
+ from pyasn1.type import tag,namedtype,namedval,univ,constraint,char,useful
+ from pyasn1.codec.der import decoder, encoder
+ from pyasn1 import error
+ 
+-import models
++import dslib.models as models
+ 
+-from properties.properties import Properties as props
++from dslib.properties.properties import Properties as props
+ 
+ def parse_url( crl_url):
+     url = crl_url
+@@ -56,10 +59,10 @@
+     path = url[slash:]
+     return hostname, path
+ 
+-from certs.cert_verifier import *
+-from certs.cert_loader import *
+-import httplib
+-from pkcs7.asn1_models.crl import *
++from dslib.certs.cert_verifier import *
++from dslib.certs.cert_loader import *
++import http.client as httplib
++from dslib.pkcs7.asn1_models.crl import *
+ 
+ def download_crl(url):
+     hostname, path = parse_url(url)
+@@ -73,7 +76,7 @@
+ from pyasn1.codec.der import decoder
+ from pyasn1 import error
+ 
+-from pkcs7.asn1_models.crl import * 
++from dslib.pkcs7.asn1_models.crl import * 
+ 
+ def decode_crl(der_data):
+     crl = decoder.decode(der_data, asn1Spec=RevCertificateList())[0]
+@@ -107,14 +110,14 @@
+ 
+ 
+ def v_crl(cert):
+-  import certs.cert_loader as l
++  import dslib.certs.cert_loader as l
+   certs = l.load_certificates_from_dir("trusted_certificates")
+   # crl
+   dl = download_crl("http://www.postsignum.cz/crl/psqualifiedca.crl")
+   crl = decode_crl(dl)
+   rev_certs = crl.getComponentByName("tbsCertList").getComponentByName("revokedCertificates")._value
+   
+-  import certs.crl_verifier as v
++  import dslib.certs.crl_verifier as v
+   
+   r = v.verify_crl(crl, certs[2])
+   
+@@ -135,7 +138,7 @@
+ sprava, podpisana dorucenka).
+ '''
+ 
+-from certs.cert_manager import CertificateManager
++from dslib.certs.cert_manager import CertificateManager
+ 
+ CertificateManager.read_trusted_certificates_from_dir("trusted_certificates")
+ #f = open(os.path.join("test_msgs","signedSentMessage"), "rb")
+@@ -200,7 +203,8 @@
+ #is_ok = verify_certificate(trusted[0], trusted, check_crl=True)
+ 
+ 
+-import pkcs7.tstamp_helper
++import dslib.pkcs7.tstamp_helper
++import dslib.pkcs7 as pkcs7
+ 
+ qts_verified, tstinfo = pkcs7.tstamp_helper.parse_qts(m.dmQTimestamp, verify=True)
+ 
+@@ -222,7 +226,7 @@
+ 
+ 
+ # try something from crls
+-import certs.crl_store as crl_store
++import dslib.certs.crl_store as crl_store
+ 
+ certificate = m.pkcs7_data.certificates[0]
+ issuer = str(certificate.tbsCertificate.issuer)
+@@ -232,7 +236,7 @@
+ url = dps[0]
+ # find certificate issued for issuer 
+ # in case of DS, certificate for PSQCA issued by PSROOTCA
+-import certs.cert_finder as finder
++import dslib.certs.cert_finder as finder
+ cert = finder.find_cert_by_subject(issuer, trusted)
+ 
+ crl_cache = crl_store.CRL_cache_manager.get_cache()
+diff -ruN a/properties/properties.py b/properties/properties.py
+--- a/properties/properties.py	2012-01-13 11:31:22.000000000 +0100
++++ b/properties/properties.py	2026-10-17 11:25:52.265313584 +0200
+@@ -18,7 +18,7 @@
+ #*
+ 
+ # standard library imports
+-from ConfigParser import ConfigParser
++from configparser import ConfigParser
+ 
+ 
+ class Properties(object):
+@@ -49,7 +49,7 @@
+   
+   @classmethod
+   def __str_to_long(cls, str):
+-    return long(str)
++    return int(str)
+     
+   @classmethod
+   def load_from_file(self,file):
+@@ -62,7 +62,7 @@
+     cfg = ConfigParser()
+     cfg.read(file)
+     sec_items = cfg.items(self.SECURITY_SECTION_NAME)
+-    for i in xrange(len(sec_items)):
++    for i in range(len(sec_items)):
+       name = sec_items[i][0].upper()
+       if name in self._boolean_values:        
+         setattr(self, name, self.__str_to_bool(sec_items[i][1]))
+diff -ruN a/setup.py b/setup.py
+--- a/setup.py	2012-02-28 10:32:13.000000000 +0100
++++ b/setup.py	2026-10-17 11:37:45.908910445 +0200
+@@ -54,8 +54,8 @@
+                 ('share/dslib/trusted_certificates',
+                  glob.glob('trusted_certificates/*.pem')),
+                 ],
+-  requires = ['pyOpenSSL (>=0.9)', 'sudsds (>=1.0)', 'pyasn1 (>=0.0.13)'],
+-  install_requires = ['pyOpenSSL>=0.9', 'sudsds>=1.0', 'pyasn1>=0.0.13'],
++  requires = [],
++  install_requires = [],
+   provides=["dslib"],
+   )
+ 
+diff -ruN a/tests.py b/tests.py
+--- a/tests.py	2012-07-02 12:48:43.000000000 +0200
++++ b/tests.py	2026-10-17 11:34:00.349066778 +0200
+@@ -43,9 +43,9 @@
+              }
+              
+   print (template % heading).encode("utf-8")
+-  print "------------------------------------------------------------------------------------"
++  print("------------------------------------------------------------------------------------")
+   reply = ds_client.GetListOfSentMessages()
+-  print reply
++  print(reply)
+   for message in ds_client.GetListOfSentMessages().data:
+     print (template % (message.__dict__)).encode("utf-8")
+ 
+@@ -61,7 +61,7 @@
+              }
+              
+   print (template % heading).encode("utf-8")
+-  print "------------------------------------------------------------------------------------"
++  print("------------------------------------------------------------------------------------")
+   for message in ds_client.GetListOfReceivedMessages().data:
+     print (template % (message.__dict__)).encode("utf-8")
+ 
+@@ -70,13 +70,13 @@
+ def MessageDownload():
+   for envelope in ds_client.GetListOfReceivedMessages().data:
+     message = ds_client.MessageDownload(envelope.dmID).data
+-    print "dmID:", message.dmID
+-    print "dmSender:", message.dmSender.encode('utf-8')
+-    print "dmAnnotation:", message.dmAnnotation.encode('utf-8')
+-    print "dmDeliveryTime:", type(message.dmDeliveryTime), message.dmDeliveryTime
+-    print "Attachments:"
++    print("dmID:", message.dmID)
++    print("dmSender:", message.dmSender.encode('utf-8'))
++    print("dmAnnotation:", message.dmAnnotation.encode('utf-8'))
++    print("dmDeliveryTime:", type(message.dmDeliveryTime), message.dmDeliveryTime)
++    print("Attachments:")
+     for f in message.dmFiles:
+-      print "  '%s' saved" % f.save_file("./")
++      print("  '%s' saved" % f.save_file("./"))
+     break # just the first one
+ 
+ 
+@@ -84,28 +84,28 @@
+ def MessageEnvelopeDownload():
+   for envelope in ds_client.GetListOfReceivedMessages().data:
+     message = ds_client.MessageEnvelopeDownload(envelope.dmID).data
+-    print "dmID:", message.dmID
+-    print "dmSender:", message.dmSender.encode('utf-8')
+-    print "dmAnnotation:", message.dmAnnotation.encode('utf-8')
++    print("dmID:", message.dmID)
++    print("dmSender:", message.dmSender.encode('utf-8'))
++    print("dmAnnotation:", message.dmAnnotation.encode('utf-8'))
+ 
+ 
+ @active
+ def GetDeliveryInfo():
+   for envelope in ds_client.GetListOfSentMessages().data:
+     message = ds_client.GetDeliveryInfo(envelope.dmID).data
+-    print "dmID:", message.dmID
+-    print "dmSender:", message.dmSender.encode('utf-8')
+-    print "dmAnnotation:", message.dmAnnotation.encode('utf-8')
+-    print "dmHash:", message.dmHash
++    print("dmID:", message.dmID)
++    print("dmSender:", message.dmSender.encode('utf-8'))
++    print("dmAnnotation:", message.dmAnnotation.encode('utf-8'))
++    print("dmHash:", message.dmHash)
+     for event in message.dmEvents:
+-      print event
+-    print "----------------------------------------"
++      print(event)
++    print("----------------------------------------")
+ 
+ @active
+ def DummyOperation():
+-  print "Should be None None"
++  print("Should be None None")
+   reply = ds_client.DummyOperation()
+-  print "Actually is", reply.status, reply.data
++  print("Actually is", reply.status, reply.data)
+ 
+ @active
+ def FindDataBox():
+@@ -115,7 +115,7 @@
+   info.firmName = u"Město Kladno"
+   info.adZipCode = "27201"
+   reply = ds_client.FindDataBox(info)
+-  print " * Should find one hit for Kladno"
++  print(" * Should find one hit for Kladno")
+   print (u"%-10s %-20s %-20s %-20s" % ("ID","Name","Street","City")).encode("utf-8")
+   for owner in reply.data:
+     print (u"%-10s %-20s %-20s %-20s" % (owner.dbID, owner.firmName, owner.adStreet, owner.adCity)).encode('utf-8')
+@@ -125,7 +125,7 @@
+   info.firmName = u"Město"
+   reply = ds_client.FindDataBox(info)
+   print
+-  print " * Now much more hits starting with 'Město'"
++  print(" * Now much more hits starting with 'Město'")
+   print (u"%-10s %-30s %-20s %-20s" % ("ID","Name","Street","City")).encode("utf-8")
+   for owner in reply.data:
+     print (u"%-10s %-30s %-20s %-20s" % (owner.dbID, owner.firmName, owner.adStreet, owner.adCity)).encode('utf-8')
+@@ -135,15 +135,15 @@
+   info.firmName = u"Prase"
+   reply = ds_client.FindDataBox(info)
+   print
+-  print " * Should not find anything for 'Prase'"
+-  print "Result:", reply.data
++  print(" * Should not find anything for 'Prase'")
++  print("Result:", reply.data)
+   # part 4
+   info = models.dbOwnerInfo()
+   info.dbType = "OVM"
+   info.dbID = u"hjyaavk"
+   reply = ds_client.FindDataBox(info)
+   print
+-  print " * Searching using dbID - should find Milotice only"
++  print(" * Searching using dbID - should find Milotice only")
+   print (u"%-10s %-30s %-20s %-20s" % ("ID","Name","Street","City")).encode("utf-8")
+   for owner in reply.data:
+     print (u"%-10s %-30s %-20s %-20s" % (owner.dbID, owner.firmName, owner.adStreet, owner.adCity)).encode('utf-8')
+@@ -153,7 +153,7 @@
+   info.ic = u"00282651"
+   reply = ds_client.FindDataBox(info)
+   print
+-  print " * Searching using IC - should find Slapanice"
++  print(" * Searching using IC - should find Slapanice")
+   print (u"%-10s %-30s %-20s %-20s" % ("ID","Name","Street","City")).encode("utf-8")
+   for owner in reply.data:
+     print (u"%-10s %-30s %-20s %-20s" % (owner.dbID, owner.firmName, owner.adStreet, owner.adCity)).encode('utf-8')
+@@ -173,62 +173,62 @@
+   dmfile.dmEncodedContent = base64.standard_b64encode("tohle je pokusny text v pokusne priloze")
+   dmfiles = [dmfile]
+   reply = ds_client.CreateMessage(envelope, dmfiles)
+-  print reply.status
+-  print "Message ID is:", reply.data
++  print(reply.status)
++  print("Message ID is:", reply.data)
+ 
+ @active
+ def GetOwnerInfoFromLogin():
+   reply = ds_client.GetOwnerInfoFromLogin()
+-  print reply.status
+-  print reply.data
++  print(reply.status)
++  print(reply.data)
+ 
+ @active
+ def GetUserInfoFromLogin():
+   reply = ds_client.GetUserInfoFromLogin()
+-  print reply.status
+-  print reply.data
++  print(reply.status)
++  print(reply.data)
+ 
+ @active
+ def SignedMessageDownload():
+   for envelope in ds_client.GetListOfReceivedMessages().data:
+-    print "ID:", envelope.dmID
++    print("ID:", envelope.dmID)
+     reply = ds_client.SignedMessageDownload(envelope.dmID)    
+-    print reply.status
+-    print "ID matches:", reply.data.dmID, reply.data.dmID == envelope.dmID
+-    print "Verified message: %s" % reply.data.is_message_verified()
+-    print "Verified certificate: %s" % reply.data.pkcs7_data.certificates[0].is_verified()
+-    print reply.data.check_timestamp()
++    print(reply.status)
++    print("ID matches:", reply.data.dmID, reply.data.dmID == envelope.dmID)
++    print("Verified message: %s" % reply.data.is_message_verified())
++    print("Verified certificate: %s" % reply.data.pkcs7_data.certificates[0].is_verified())
++    print(reply.data.check_timestamp())
+     break
+ 
+ @active
+ def SignedSentMessageDownload():
+   for envelope in ds_client.GetListOfSentMessages().data:
+-    print "ID:", envelope.dmID
++    print("ID:", envelope.dmID)
+     reply = ds_client.SignedSentMessageDownload(envelope.dmID)    
+-    print reply.status
+-    print "ID matches:", reply.data.dmID, reply.data.dmID == envelope.dmID
+-    print "Verified message: %s" % reply.data.is_message_verified()
+-    print "Verified certificate: %s" % reply.data.pkcs7_data.certificates[0].is_verified()
+-    print "Attachments:"
++    print(reply.status)
++    print("ID matches:", reply.data.dmID, reply.data.dmID == envelope.dmID)
++    print("Verified message: %s" % reply.data.is_message_verified())
++    print("Verified certificate: %s" % reply.data.pkcs7_data.certificates[0].is_verified())
++    print("Attachments:")
+     for f in reply.data.dmFiles:
+-      print "  Attachment '%s'" % f._dmFileDescr
++      print("  Attachment '%s'" % f._dmFileDescr)
+     break # just the first one
+   
+ @active
+ def GetSignedDeliveryInfo():  
+   for envelope in ds_client.GetListOfSentMessages().data:
+-    print type(envelope)
+-    print "ID:", envelope.dmID
++    print(type(envelope))
++    print("ID:", envelope.dmID)
+     reply = ds_client.GetSignedDeliveryInfo(envelope.dmID)    
+-    print reply.status
+-    print reply.data
+-    print "ID matches:", reply.data.dmID, reply.data.dmID == envelope.dmID
+-    print "Verified message: %s" % reply.data.is_verified
+-    print "Verified certificate: %s" % reply.data.pkcs7_data.certificates[0].is_verified()
+-    print "Timestamp verified: %s" % reply.data.check_timestamp()
++    print(reply.status)
++    print(reply.data)
++    print("ID matches:", reply.data.dmID, reply.data.dmID == envelope.dmID)
++    print("Verified message: %s" % reply.data.is_verified)
++    print("Verified certificate: %s" % reply.data.pkcs7_data.certificates[0].is_verified())
++    print("Timestamp verified: %s" % reply.data.check_timestamp())
+     for event in reply.data.dmEvents:
+-      print "  Event", event
+-    f = file("dodejka.zfo","w")
++      print("  Event", event)
++    f = open("dodejka.zfo","w")
+     import base64
+     f.write(base64.b64decode(reply.additional_data['raw_data']))
+     f.close()
+@@ -237,7 +237,7 @@
+ @active
+ def GetPasswordInfo():
+   reply = ds_client.GetPasswordInfo()
+-  print "Password expires: %s" %reply.data
++  print("Password expires: %s" %reply.data)
+   
+ @active
+ def ChangeISDSPassword():  
+@@ -245,33 +245,33 @@
+   old_pass = getpass.getpass("Current password:")
+   new_pass = getpass.getpass("New password:")
+   reply = ds_client.ChangeISDSPassword(old_pass, new_pass)
+-  print "%s : %s"% (reply.status.dbStatusCode, reply.status.dbStatusMessage)
++  print("%s : %s"% (reply.status.dbStatusCode, reply.status.dbStatusMessage))
+   
+ @active
+ def AuthenticateMessage():
+   import base64
+-  print "This should return None"
++  print("This should return None")
+   reply = ds_client.AuthenticateMessage(base64.b64encode("Hello DS"))
+-  print "Actually is", reply.data
+-  print "-----------------------------------------------"
+-  print "This should complete successfully"
+-  import local
++  print("Actually is", reply.data)
++  print("-----------------------------------------------")
++  print("This should complete successfully")
++  import dslib.local as local
+   test_dir = local.find_data_directory("test_msgs")
+-  f = file(os.path.join(test_dir,"AuthenticateMessage-test.txt"),"r")
++  f = open(os.path.join(test_dir,"AuthenticateMessage-test.txt"),"r")
+   text = f.read()
+   f.close()
+   reply = ds_client.AuthenticateMessage(text)
+-  print "Actually is", reply.status
+-  print "Message verified successfully:", reply.data
++  print("Actually is", reply.status)
++  print("Message verified successfully:", reply.data)
+   
+ @active
+ def MarkMessageAsDownloaded():  
+   i = 0
+   for envelope in ds_client.GetListOfReceivedMessages().data:
+-    print "ID:", envelope.dmID
++    print("ID:", envelope.dmID)
+     reply = ds_client.MarkMessageAsDownloaded(envelope.dmID)    
+-    print reply.status
+-    print reply.data
++    print(reply.status)
++    print(reply.data)
+     i += 1
+     if i > 2:
+       break
+@@ -279,11 +279,11 @@
+ @active
+ def ConfirmDelivery():  
+   for envelope in ds_client.GetListOfReceivedMessages().data:
+-    print "*ID:", envelope.dmID, envelope._dmType, envelope.dmMessageStatus
++    print("*ID:", envelope.dmID, envelope._dmType, envelope.dmMessageStatus)
+     if envelope._dmType == "K" and envelope.dmMessageStatus == 4: 
+       reply = ds_client.ConfirmDelivery(envelope.dmID)    
+-      print reply.status
+-      print reply.data
++      print(reply.status)
++      print(reply.data)
+       break
+ 
+ 
+@@ -293,14 +293,14 @@
+   #logging.getLogger('suds').setLevel(logging.DEBUG)
+   def otp_callback(last_problem=None):
+     if last_problem:
+-      print last_problem
+-    x = raw_input("Generated code: ")
++      print(last_problem)
++    x = input("Generated code: ")
+     return x
+   
+   def list_tests(tests):
+-    print "Available tests:"
++    print("Available tests:")
+     for i,test in enumerate(tests):
+-      print "  %2d. %s" % (i, test.__name__)
++      print("  %2d. %s" % (i, test.__name__))
+     print
+     
+   # get list of tests
+@@ -387,7 +387,7 @@
+   # run the tests
+   if to_run:
+     # setup the client argument and attributes
+-    import local
++    import dslib.local as local
+     cert_dir = local.find_data_directory("trusted_certificates")
+     args = dict(test_environment=options.test_account,
+                 server_certs=os.path.join(cert_dir, "all_trusted.pem"),
+@@ -398,21 +398,21 @@
+       if options.p12file:
+         # PKCS12 file certificate and key storage
+         import OpenSSL
+-        f = file(options.p12file, 'rb')
++        f = open(options.p12file, 'rb')
+         p12text = f.read()
+         f.close()
+         import getpass
+         password = getpass.getpass("Enter PKSC12 file password:")
+         try:
+           p12obj = OpenSSL.crypto.load_pkcs12(p12text, password)
+-        except OpenSSL.crypto.Error, e:
++        except OpenSSL.crypto.Error as e:
+           a = e.args
+           if type(a) in (list,tuple) and type(a[0]) in (list,tuple) and \
+             type(a[0][0]) in (list,tuple) and e.args[0][0][2] == 'mac verify failure':
+-            print "Wrong password! Exiting."
++            print("Wrong password! Exiting.")
+             sys.exit()
+-        except Exception, e:
+-          print "Error:", e
++        except Exception as e:
++          print("Error:", e)
+           sys.exit()
+         login_method = options.login_method or 'user_certificate'
+         args.update(client_certobj=p12obj.get_certificate(),
+@@ -431,8 +431,8 @@
+       # try to find a stored password
+       passfile = "./.isds_password"
+       if os.path.exists(passfile):
+-        print "Using password from '%s'" % passfile
+-        password = file(passfile,'r').read().strip()
++        print("Using password from '%s'" % passfile)
++        password = open(passfile,'r').read().strip()
+       else:
+         import getpass
+         password = getpass.getpass("Enter login password:")
+@@ -444,14 +444,14 @@
+     ds_client = Client(**args)
+     # run the tests
+     for test in to_run:
+-      print "==================== %s ====================" % test.__name__
++      print("==================== %s ====================" % test.__name__)
+       # if testing password change, pass current password      
+       test()
+-      print "==================== end of %s ====================" % test.__name__  
++      print("==================== end of %s ====================" % test.__name__)
+       print
+       print
+     ds_client.logout_from_server()
+   else:
+     list_tests(tests)
+-    print op.get_usage()
++    print(op.get_usage())
+ 

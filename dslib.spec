@@ -1,35 +1,29 @@
 Summary:	Free Python library for accessing Datove schranky
 Name:		dslib
 Version:	2.1.0
-Release:	4
+Release:	5
 Source0:	http://www.nic.cz/public_media/datove_schranky/releases/datovka-2.1.1/src/%{name}-%{version}.tar.gz
+# Upstream stopped at Python 2. This port keeps the 2.1.0 API on Python 3.15.
+Patch0:		dslib-2.1.0-python315.patch
 License:	LGPL
 Group:		System/Libraries
-BuildArch:	noarch
-Requires:	python-OpenSSL
-BuildRequires:	python-setuptools
 URL:		https://labs.nic.cz/datove-schranky/
+BuildSystem:	python
+BuildArch:	noarch
+BuildRequires:	python
+BuildRequires:	python%{pyver}dist(setuptools)
+Requires:	python%{pyver}dist(pyopenssl)
+Requires:	python%{pyver}dist(pyasn1)
+Requires:	python%{pyver}dist(sudsds)
 
 %description
-dslib is a Python library for accessing a 'Databox' - an 
+dslib is a Python library for accessing a 'Databox' - an
 electronic communication interface endorsed by the Czech government.
 
-%prep
-%setup -n %{name}-%{version} -n %{name}-%{version} -q
-
-%build
-python setup.py build
-
-%install
-python setup.py install --single-version-externally-managed \
-	--root=%{buildroot}
-
 %files
-%dir %{py_puresitedir}/%{name}*
-%{py_puresitedir}/%{name}*/*
-%dir %{_datadir}/%{name}
-%{_datadir}/%{name}/*
-
+%{py_puresitedir}/dslib
+%{py_puresitedir}/dslib-%{version}-py%{pyver}.egg-info
+%{_datadir}/dslib
 
 %changelog
 * Thu Jul 19 2012 Alexander Khrukin <akhrukin@mandriva.org> 2.1.0-1
@@ -53,4 +47,3 @@ python setup.py install --single-version-externally-managed \
 -fix release!
 - fix python macros, license, group
 - import dslib
-
